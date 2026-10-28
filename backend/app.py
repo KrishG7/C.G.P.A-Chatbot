@@ -3,7 +3,8 @@ import json
 import traceback
 import pickle
 import pandas as pd
-from flask import Flask, request, jsonify, render_template, send_from_directory
+from functools import wraps
+from flask import g, Flask, request, jsonify, render_template, send_from_directory
 from flask_cors import CORS
 import google.generativeai as genai
 from dotenv import load_dotenv
@@ -51,7 +52,8 @@ if api_key:
         max_output_tokens=4096,
     )
     model = genai.GenerativeModel(
-        model_name='gemini-2.0-flash',
+        # Google retires Gemini models; override with GEMINI_MODEL instead of editing code.
+        model_name=os.getenv('GEMINI_MODEL', 'gemini-flash-latest'),
         generation_config=generation_config
     )
 else:
@@ -64,6 +66,62 @@ supabase: Client = None
 if SUPABASE_URL and SUPABASE_KEY:
     try: supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
     except: pass
+
+
+# --- AUTH: Supabase Auth + a `profiles` table (role, approved) ---------------------------------
+# The browser never decides who it is. Every protected route reads the bearer token, verifies it
+# with Supabase Auth and takes the role from the `profiles` table. Teachers stay unapproved until
+# an admin approves them; admin rows can only be created in the Supabase SQL editor.
+def new_client():
+    # A fresh client per auth call: signing in on a shared client would swap its Authorization
+    # header, and later database calls would run as that user instead of the service role.
+    return create_client(SUPABASE_URL, SUPABASE_KEY)
+
+
+def get_profile(email):
+    if not supabase or not email:
+        return None
+    rows = supabase.table('profiles').select('*').eq('email', email.lower()).limit(1).execute().data
+    return rows[0] if rows else None
+
+
+def current_user():
+    """The verified {email, role, approved} behind the bearer token, or None for a guest."""
+    header = request.headers.get('Authorization', '')
+    if not header.startswith('Bearer ') or not supabase:
+        return None
+    try:
+        user = new_client().auth.get_user(header[7:]).user
+    except Exception:
+        return None
+    if not user or not user.email:
+        return None
+    profile = get_profile(user.email)
+    if not profile:
+        return None
+    return {'email': user.email.lower(), 'role': profile['role'], 'approved': bool(profile['approved'])}
+
+
+def require_role(*roles):
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            user = current_user()
+            if not user:
+                return jsonify({'success': False, 'msg': 'Login required'}), 401
+            if user['role'] not in roles or not user['approved']:
+                return jsonify({'success': False, 'msg': 'Not allowed'}), 403
+            g.user = user
+            return fn(*args, **kwargs)
+        return wrapper
+    return decorator
+
+
+def class_owned(class_id, email):
+    if not supabase or not class_id:
+        return False
+    rows = supabase.table('classes').select('id').eq('id', class_id).eq('teacher_email', email).limit(1).execute().data
+    return bool(rows)
 
 # --- 2. LOAD THE "TRAINED BRAIN" ---
 chunks = []
@@ -140,11 +198,26 @@ def home(): return render_template('index.html')
 
 # --- HISTORY ROUTE ---
 @app.route('/get_history', methods=['POST'])
+@require_role('student', 'teacher', 'admin')
 def get_history():
     if not supabase: return jsonify({'history': []})
-    email = request.json.get('email')
+    email = g.user['email']
     res = supabase.table('conversations').select('*').eq('user_email', email).order('created_at', desc=False).limit(50).execute()
     return jsonify({'history': res.data})
+
+def extract_action(text):
+    """Return the first JSON object in a model reply.
+
+    The model sometimes wraps the command in a ```json fence or adds a sentence after it; parsing
+    the whole reply then fails and the raw command (and the model's guessed numbers) reaches the user.
+    """
+    clean = text.replace('```json', '').replace('```', '')
+    start = clean.find('{')
+    if start == -1:
+        raise ValueError("no JSON object in reply")
+    obj, _ = json.JSONDecoder().raw_decode(clean[start:])
+    return obj
+
 
 @app.route('/chat', methods=['POST'])
 def chat():
@@ -152,8 +225,9 @@ def chat():
         data = request.json
         msg = data.get('message', '')
         hist = data.get('history', []) 
-        role = data.get('role', 'guest')
-        email = data.get('email', '')
+        user = current_user()                      # the browser-supplied role/email are ignored
+        role = user['role'] if user and user['approved'] else 'guest'
+        email = user['email'] if user and user['approved'] else ''
         cid = data.get('class_id')
         
         # 1. Save User Message
@@ -164,6 +238,8 @@ def chat():
         
         # --- TEACHER INTELLIGENCE ---
         if role == 'teacher' and email and supabase:
+            if cid and not class_owned(cid, email):   # a teacher may only act on their own class
+                cid = None
             if not cid:
                 c = supabase.table('classes').select('id').eq('teacher_email', email).limit(1).execute()
                 if c.data: cid = c.data[0]['id']
@@ -228,8 +304,7 @@ def chat():
         # --- ACTION HANDLER ---
         if '"action":' in txt:
             try:
-                clean = txt.replace('```json','').replace('```','').strip()
-                cmd = json.loads(clean)
+                cmd = extract_action(txt)
                 
                 # =====================================================
                 # ACTION 1: UPDATE ATTENDANCE (WRITE)
@@ -362,15 +437,17 @@ def chat():
 
 # --- 5. ROSTER UPLOAD ---
 @app.route('/upload_smart_roster', methods=['POST'])
+@require_role('teacher')
 def upload_smart_roster():
     if not supabase: return jsonify({'success': False, 'msg': 'DB Error'})
     
     try:
         file = request.files['file']
         class_id = request.form.get('class_id')
-        teacher_email = request.form.get('email')
+        teacher_email = g.user['email']
 
         if not file or not class_id: return jsonify({'success': False, 'msg': 'Missing data'})
+        if not class_owned(class_id, teacher_email): return jsonify({'success': False, 'msg': 'Not your class'}), 403
 
         if file.filename.endswith('.csv'):
             df = pd.read_csv(file)
@@ -431,28 +508,126 @@ def get_subjects_dynamic():
         return jsonify({'subjects': []})
 
 @app.route('/login', methods=['POST'])
-def login(): return jsonify({'success': True, 'email': request.json.get('email')})
+def login():
+    data = request.json or {}
+    email = (data.get('email') or '').strip().lower()
+    password = data.get('password') or ''
+    if not email or not password:
+        return jsonify({'success': False, 'msg': 'Email and password are required'}), 400
+    try:
+        session = new_client().auth.sign_in_with_password({'email': email, 'password': password}).session
+    except Exception:
+        return jsonify({'success': False, 'msg': 'Invalid email or password'}), 401
+    profile = get_profile(email)
+    if not profile:
+        return jsonify({'success': False, 'msg': 'No profile for this account'}), 403
+    if not profile['approved']:
+        return jsonify({'success': False, 'msg': 'Your teacher account is waiting for admin approval'}), 403
+    return jsonify({'success': True, 'token': session.access_token, 'email': email, 'role': profile['role']})
+
+
+@app.route('/signup', methods=['POST'])
+def signup():
+    data = request.json or {}
+    email = (data.get('email') or '').strip().lower()
+    password = data.get('password') or ''
+    role = data.get('role')
+    if not email or len(password) < 8:
+        return jsonify({'success': False, 'msg': 'An email and a password of at least 8 characters are required'}), 400
+    if role not in ('student', 'teacher'):          # admins can only be created in the Supabase SQL editor
+        return jsonify({'success': False, 'msg': 'Role must be student or teacher'}), 400
+    if not supabase:
+        return jsonify({'success': False, 'msg': 'Database not configured'}), 503
+    try:
+        new_client().auth.sign_up({'email': email, 'password': password})
+    except Exception as e:
+        return jsonify({'success': False, 'msg': str(e)[:200]}), 400
+    if not get_profile(email):                      # never overwrite a pre-created admin row
+        supabase.table('profiles').insert({'email': email, 'role': role, 'approved': role == 'student'}).execute()
+    msg = 'Account created. An admin must approve teacher accounts before you can log in.' if role == 'teacher' else 'Account created.'
+    return jsonify({'success': True, 'msg': msg})
+
+
+@app.route('/admin/pending', methods=['POST'])
+@require_role('admin')
+def admin_pending():
+    rows = supabase.table('profiles').select('email, created_at').eq('role', 'teacher').eq('approved', False).execute().data
+    return jsonify({'pending': rows})
+
+
+@app.route('/admin/approve', methods=['POST'])
+@require_role('admin')
+def admin_approve():
+    email = ((request.json or {}).get('email') or '').strip().lower()
+    profile = get_profile(email)
+    if not profile or profile['role'] != 'teacher':
+        return jsonify({'success': False, 'msg': 'No such teacher'}), 404
+    supabase.table('profiles').update({'approved': True}).eq('email', email).execute()
+    return jsonify({'success': True})
 
 @app.route('/get_classes', methods=['POST'])
+@require_role('teacher')
 def get_classes():
     if not supabase: return jsonify({'classes': []})
-    res = supabase.table('classes').select('*').eq('teacher_email', request.json.get('email')).execute()
+    res = supabase.table('classes').select('*').eq('teacher_email', g.user['email']).execute()
     return jsonify({'classes': res.data})
 
+def attach_attendance(students, records):
+    """Fill details['Attendance'] with the live percentage from attendance_records.
+
+    The value stored at roster upload ("0%") is never updated when attendance is marked, so the
+    sidebar showed 0% for students who had just been marked present.
+    """
+    dates, present = {}, {}
+    for r in records:
+        dates.setdefault(r['class_id'], set()).add(r['date'])
+        if r['status'] == 'Present':
+            key = (r['class_id'], r['student_id'])
+            present[key] = present.get(key, 0) + 1
+    for s in students:
+        total = len(dates.get(s['class_id'], ()))
+        if total:
+            pct = round(present.get((s['class_id'], s['student_id']), 0) / total * 100, 1)
+            s['details'] = {**(s.get('details') or {}), 'Attendance': f"{pct:g}%"}
+    return students
+
+
 @app.route('/get_students', methods=['POST'])
+@require_role('teacher')
 def get_students():
     if not supabase: return jsonify({'students': []})
-    res = supabase.table('students').select('*').eq('teacher_email', request.json.get('email')).execute()
-    return jsonify({'students': res.data})
+    res = supabase.table('students').select('*').eq('teacher_email', g.user['email']).execute()
+    students = res.data
+    class_ids = sorted({s['class_id'] for s in students})
+    if class_ids:
+        records = supabase.table('attendance_records').select('*').in_('class_id', class_ids).execute().data
+        students = attach_attendance(students, records)
+    return jsonify({'students': students})
 
 @app.route('/create_class', methods=['POST'])
+@require_role('teacher')
 def create_class():
-    if supabase: supabase.table('classes').insert(request.json).execute()
+    data = request.json or {}
+    # The frontend sends {email, name}; the table columns are teacher_email and class_name.
+    teacher_email = g.user['email']
+    if not teacher_email or not data.get('name'):
+        return jsonify({'success': False, 'msg': 'name and email are required'}), 400
+    if supabase:
+        supabase.table('classes').insert({'teacher_email': teacher_email, 'class_name': data['name']}).execute()
     return jsonify({'success': True})
 
 @app.route('/delete_student', methods=['POST'])
+@require_role('teacher')
 def delete_student():
-    if supabase: supabase.table('students').delete().eq('student_id', request.json.get('id')).execute()
+    data = request.json or {}
+    # Scope the delete to one class (and teacher). Filtering on student_id alone would remove
+    # that roll number from every class of every teacher.
+    if not data.get('id') or not data.get('class_id'):
+        return jsonify({'success': False, 'msg': 'id and class_id are required'}), 400
+    if supabase:
+        q = supabase.table('students').delete().eq('student_id', data['id']).eq('class_id', data['class_id'])
+        q = q.eq('teacher_email', g.user['email'])
+        q.execute()
     return jsonify({'success': True})
 
 if __name__ == '__main__':

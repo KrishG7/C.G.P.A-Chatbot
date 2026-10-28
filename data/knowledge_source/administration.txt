@@ -1,0 +1,96 @@
+# Faculty of Technology - Administration & Committees
+
+---
+
+## General Contact Information
+**Address:** Faculty of Technology, Maharishi Kanad Bhawan, University of Delhi, Delhi-110007, India.
+**Landline:** 011-27662880
+**General Emails:**
+* office@fot.du.ac.in
+* dean_fot@du.ac.in
+
+---
+
+## Administrative Committees
+
+### Anti-Ragging Committee
+* **Chairperson:** Dr. Vanita Jain
+* **Convener:** Dr. Jeetendra Prasad
+* **Members:** Dr. Diptiranjan Samantaray, Dr. Deepika, Dr. Juhi Jain
+* **Email:** arc@fot.du.ac.in
+
+### Anti-Smoking Committee
+* **Members:** Dr. Jeetendra Prasad, Dr. Ujjal Sur, Mr. Unmesh Shukla
+* **Email:** asc@fot.du.ac.in
+
+### Committee for Differently-Abled
+* **Chairperson:** Dr. Vanita Jain
+* **Members:** Dr. Diptiranjan Samantaray, Dr. Deepika, Dr. Ujjal Sur, Mr. Khushwant Sehra
+* **Email:** cda@fot.du.ac.in
+
+### Departmental Committee
+* **Chairperson:** Dr. Vanita Jain
+* **Convener:** Mr. Unmesh Shukla
+* **Members:** Dr. Arjun Tyagi, Dr. Deepika, Dr. Diptiranjan Samantaray, Dr. Jeetendra Prasad, Dr. Juhi Jain, Dr. Ujjal Sur, Mr. Khushwant Sehra
+* **Email:** dc@fot.du.ac.in
+
+### Disciplinary Committee
+* **Convener:** Dr. Juhi Jain
+* **Members:** Dr. Deepika, Dr. Jeetendra Prasad
+* **Email:** disciplinary@fot.du.ac.in
+
+### Extra Curriculum Activities - Sports - Recreation (ECASR)
+* **Convener:** Dr. Arjun Tyagi
+* **Members:** Dr. Deepika, Dr. Jeetendra Prasad, Dr. Ujjal Sur
+* **Email:** ecasr@fot.du.ac.in
+
+### Internal Admission Committee (IAC)
+* **Chairperson:** Dr. Vanita Jain
+* **Convener (EE):** Dr. Arjun Tyagi
+* **Convener (ECE):** Mr. Khushwant Sehra
+* **Convener (CSE):** Mr. Unmesh Shukla
+* **Members:** Dr. Deepika, Dr. Diptiranjan Samantaray, Dr. Jeetendra Prasad, Dr. Juhi Jain, Dr. Ujjal Sur
+* **Email:** iac@fot.du.ac.in
+
+### Internal Assessment Monitoring Committee
+* **Chairperson:** Dr. Vanita Jain
+* **Members:** Dr. Jeetendra Prasad, Dr. Ujjal Sur, Mr. Khushwant Sehra, Mr. Unmesh Shukla
+* **Email:** iamc@fot.du.ac.in
+
+### Placement Committee
+* **Convener (EE):** Dr. Arjun Tyagi
+* **Convener (ECE):** Mr. Khushwant Sehra
+* **Convener (CSE):** Mr. Unmesh Shukla
+* **Members:** Dr. Juhi Jain, Dr. Ujjal Sur
+* **Email:** placement@fot.du.ac.in
+
+### RTI Committee
+* **Convener:** Mr. Khushwant Sehra
+* **Members:** Dr. Deepika, Dr. Diptiranjan Samantaray, Mr. Unmesh Shukla
+* **Email:** rti@fot.du.ac.in
+
+### Sexual Harassment Committee
+* **Convener:** Dr. Juhi Jain
+* **Members:** Dr. Deepika, Dr. Diptiranjan Samantaray, Dr. Jeetendra Prasad, Mr. Khushwant Sehra
+* **Email:** shc@fot.du.ac.in
+
+### SC/ST/OBC/EWS Cell
+* **Convener:** Dr. Diptiranjan Samantaray
+* **Members:** Dr. Deepika, Dr. Juhi Jain, Dr. Ujjal Sur
+* **Email:** SCSTOBCEWS@fot.du.ac.in
+
+### Students Grievance and Redressal Committee
+* **Convener:** Dr. Vanita Jain
+* **Members:** Dr. Arjun Tyagi, Dr. Diptiranjan Samantaray, Dr. Jeetendra Prasad, Dr. Juhi Jain, Mr. Khushwant Sehra, Mr. Unmesh Shukla
+* **Email:** sgrc@fot.du.ac.in
+
+### Time Table Committee
+* **Chairperson:** Dr. Vanita Jain
+* **Convener:** Mr. Unmesh Shukla
+* **Members:** Dr. Arjun Tyagi, Dr. Jeetendra Prasad, Mr. Khushwant Sehra
+* **Email:** timetable@fot.du.ac.in
+
+### Website Maintenance Committee
+* **Convener:** Mr. Unmesh Shukla
+* **Members:** Dr. Juhi Jain, Dr. Ujjal Sur, Mr. Khushwant Sehra
+* **Email:** website@fot.du.ac.in

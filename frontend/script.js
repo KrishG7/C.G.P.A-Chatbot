@@ -3,12 +3,23 @@ const IS_LOCAL = window.location.hostname === 'localhost' || window.location.hos
 const RAILWAY_URL = "https://cgpa-chatbot-production.up.railway.app"; // ✅ MUST HAVE HTTPS://
 const API_BASE = IS_LOCAL ? "http://127.0.0.1:5001" : RAILWAY_URL;
 
+// Send the login token with every call to our API. The server decides who you are from it;
+// nothing the page claims about its own role or email is trusted.
+const _nativeFetch = window.fetch.bind(window);
+window.fetch = (url, opts = {}) => {
+    const token = localStorage.getItem('campus_token');
+    if (token && String(url).startsWith(API_BASE)) {
+        opts = { ...opts, headers: { ...(opts.headers || {}), Authorization: 'Bearer ' + token } };
+    }
+    return _nativeFetch(url, opts);
+};
+
 // --- AUTO-LOGIN LOGIC ---
 document.addEventListener('DOMContentLoaded', () => {
     const savedUser = localStorage.getItem('campus_user');
     const savedRole = localStorage.getItem('campus_role');
 
-    if (savedUser && savedRole) {
+    if (savedUser && savedRole && localStorage.getItem('campus_token')) {
         currentUser = savedUser;
         currentRole = savedRole;
         
@@ -163,57 +174,73 @@ function addMsg(text, isUser, isLoading, playAudio = false) {
     return div.id;
 }
 
-// --- UPDATED AUTH ---
-// Call loadChatHistory() inside window.finalizeAuth
-window.finalizeAuth = async () => {
-    // ... (existing auth logic) ...
-    // After currentUser is set:
-    loadChatHistory();
-    loadDashboard();
+// --- AUTH MODAL ---
+const _setAuthMode = (signup) => {
+    document.getElementById('auth-title').innerText = signup ? 'REGISTER' : 'LOGIN';
+    document.getElementById('auth-toggle-text').innerText = signup ? 'Have an account? Login' : 'Need an account? Sign Up';
 };
 
-// --- AUTH & GUEST ---
 window.showAuthModal = (mode) => {
     document.getElementById('auth-modal').style.display = 'flex';
-    document.getElementById('auth-title').innerText = mode === 'signup' ? "REGISTER" : "LOGIN";
+    _setAuthMode(mode === 'signup');
 };
 
 window.toggleAuthMode = () => {
-    const title = document.getElementById('auth-title');
-    title.innerText = title.innerText === 'LOGIN' ? 'REGISTER' : 'LOGIN';
+    _setAuthMode(document.getElementById('auth-title').innerText === 'LOGIN');
 };
 
 window.setRole = (role) => {
     currentRole = role;
     document.getElementById('btn-student').style.background = role === 'student' ? 'var(--accent)' : 'transparent';
+    document.getElementById('btn-student').style.color = role === 'student' ? 'black' : '';
     document.getElementById('btn-teacher').style.background = role === 'teacher' ? 'var(--accent)' : 'transparent';
+    document.getElementById('btn-teacher').style.color = role === 'teacher' ? 'black' : '';
 };
 
+// --- UPDATED AUTH ---
+// Call loadChatHistory() inside window.finalizeAuth
 window.finalizeAuth = async () => {
-    const email = document.getElementById('email-in').value;
-    if (!email) return alert("Email Required");
-    
-    // Save to LocalStorage
-    localStorage.setItem('campus_user', email);
-    localStorage.setItem('campus_role', currentRole);
-    
+    const email = document.getElementById('email-in').value.trim();
+    const password = document.getElementById('pass-in').value;
+    if (!email || !password) return alert("Email and password required");
+    const signingUp = document.getElementById('auth-title').innerText === 'REGISTER';
+
+    if (signingUp) {
+        const res = await fetch(`${API_BASE}/signup`, {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ email, password, role: currentRole === 'teacher' ? 'teacher' : 'student' })
+        });
+        const out = await res.json();
+        alert(out.msg || (out.success ? 'Account created. Now log in.' : 'Sign up failed'));
+        if (out.success) window.toggleAuthMode();
+        return;
+    }
+
     const res = await fetch(`${API_BASE}/login`, {
         method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ email, role: currentRole })
+        body: JSON.stringify({ email, password })
     });
-    
-    currentUser = email;
+    const out = await res.json();
+    if (!out.success) return alert(out.msg || 'Login failed');
+
+    localStorage.setItem('campus_token', out.token);
+    localStorage.setItem('campus_user', out.email);
+    localStorage.setItem('campus_role', out.role);      // display only: the server re-checks it on every call
+    currentUser = out.email;
+    currentRole = out.role;
+    document.getElementById('user-role-display').innerText = currentRole.toUpperCase();
     document.getElementById('auth-modal').style.display = 'none';
     document.getElementById('guest-wrapper').style.display = 'none';
     document.getElementById('app-wrapper').style.display = 'flex';
     setTimeout(() => document.getElementById('app-wrapper').style.opacity = 1, 50);
-    
+
     loadChatHistory();
     loadDashboard();
 };
 
 // Add this to script.js
 window.logout = () => {
+    localStorage.removeItem('campus_token');
     localStorage.removeItem('campus_user');
     localStorage.removeItem('campus_role');
     location.reload(); // Reloads page to show Login screen again
@@ -263,6 +290,10 @@ function loadDashboard() {
             <div class="chip" style="color:red; border-color:red;" onclick="window.deleteRecord()">Delete Record</div>
         `;
         window.loadClasses();
+    } else if (currentRole === 'admin') {
+        sidebar.innerHTML = `<div style="padding:10px;"><b>Teacher requests</b><div id="pending-list" style="margin-top:10px;"></div></div>`;
+        tools.style.display = 'none';
+        window.loadPending();
     } else {
         sidebar.innerHTML = `<div style="padding:10px;">Guest Access.<br>Ask about Faculty, Syllabus, or Admissions.</div>`;
     }
@@ -304,12 +335,27 @@ window.fetchDynamicSubjects = async () => {
     }
 };
 
+window.loadPending = async () => {
+    const res = await fetch(`${API_BASE}/admin/pending`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' });
+    const data = await res.json();
+    const box = document.getElementById('pending-list');
+    const rows = data.pending || [];
+    box.innerHTML = rows.length ? '' : '<div style="color:#888;">No pending teachers.</div>';
+    rows.forEach(t => box.innerHTML += `<div style="padding:8px 0; border-bottom:1px solid #333;">${t.email}
+        <button class="chip" style="float:right; padding:2px 10px;" onclick="window.approveTeacher('${t.email}')">Approve</button></div>`);
+};
+
+window.approveTeacher = async (email) => {
+    await fetch(`${API_BASE}/admin/approve`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ email }) });
+    window.loadPending();
+};
+
 window.loadClasses = async () => {
-    const res = await fetch(`${API_BASE}/get_classes`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({email:currentUser})});
+    const res = await fetch(`${API_BASE}/get_classes`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}'});
     const data = await res.json();
     const sel = document.getElementById('class-selector');
     sel.innerHTML = '<option value="">Select Class...</option>';
-    data.classes.forEach(c => sel.innerHTML += `<option value="${c.id}">${c.class_name}</option>`);
+    data.classes.forEach(c => sel.innerHTML += `<option value="${c.id}">${c.class_name || c.name}</option>`);
     sel.innerHTML += '<option value="NEW">+ Create New</option>';
 }
 
@@ -333,7 +379,7 @@ window.loadClassRoster = async () => {
 window.uploadSmartRoster = async () => {
     const file = document.getElementById('roster-upload').files[0];
     const formData = new FormData();
-    formData.append('file', file); formData.append('class_id', currentClassId); formData.append('email', currentUser);
+    formData.append('file', file); formData.append('class_id', currentClassId);
     addMsg("Uploading...", false, true);
     await fetch(`${API_BASE}/upload_smart_roster`, { method:'POST', body:formData });
     window.loadClassRoster();
@@ -342,7 +388,7 @@ window.uploadSmartRoster = async () => {
 
 window.deleteRecord = async () => {
     const id = prompt("ID to delete:");
-    if(id) { await fetch(`${API_BASE}/delete_student`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id})}); window.loadClassRoster(); }
+    if(id) { await fetch(`${API_BASE}/delete_student`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id, class_id: currentClassId})}); window.loadClassRoster(); }
 }
 
 // --- CHAT ---
